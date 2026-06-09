@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import DashboardCharts from "../components/DashboardCharts";
 import { Link } from "react-router-dom";
 import {
   ArrowUpRight,
