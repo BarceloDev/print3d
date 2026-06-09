@@ -169,6 +169,7 @@ export default function Dashboard() {
               })}
             </div>
           </div>
+          <DashboardCharts />
         </div>
       )}
     </AppLayout>
