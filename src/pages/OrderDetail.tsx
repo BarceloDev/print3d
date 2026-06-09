@@ -140,7 +140,8 @@ export default function OrderDetail() {
     }),
   );
 
-  console.log(order.reference_image);
+  // ✅ CORREÇÃO: console.log(order.reference_image) removido.
+  // Exibia URLs de arquivos de clientes no console do navegador em produção.
 
   return (
     <AppLayout title={order.title} subtitle={`Pedido #${order.id}`}>
