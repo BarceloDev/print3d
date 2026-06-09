@@ -22,8 +22,6 @@ import { formatCurrency } from "../lib/orderStatus";
 // ---------------------------------------------------------------------------
 // Paletas de cores
 // ---------------------------------------------------------------------------
-// Uma cor distinta por barra (eixo X tem até 30 barras nos 30 dias,
-// mas 7 e 12 ficam bem com essa paleta cíclica)
 const BAR_COLORS = [
   "#38bdf8", // sky-400
   "#818cf8", // indigo-400
@@ -34,7 +32,6 @@ const BAR_COLORS = [
   "#facc15", // yellow-400
 ];
 
-// Uma cor por fatia do pie, mapeada na ordem dos status
 const PIE_COLORS = [
   "#f59e0b", // amber  — Orçamento
   "#38bdf8", // sky    — Aprovado
@@ -45,7 +42,7 @@ const PIE_COLORS = [
 ];
 
 // ---------------------------------------------------------------------------
-// Tooltip customizado — fundo escuro igual ao tema do app
+// Tooltip customizado
 // ---------------------------------------------------------------------------
 function DarkTooltip({ active, payload, label, isCurrency = false }: {
   active?: boolean;
@@ -78,21 +75,32 @@ export default function DashboardCharts() {
   const [range, setRange] = useState<ChartRange>("7d");
   const [data, setData] = useState<ChartsData | null>(null);
   const [loading, setLoading] = useState(true);
+  // ✅ CORREÇÃO: estado de erro adicionado — antes qualquer falha da API
+  // travava o spinner infinitamente sem nenhum feedback ao usuário.
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     let active = true;
     setLoading(true);
-    getCharts(range).then((d) => {
-      if (active) {
-        setData(d);
-        setLoading(false);
-      }
-    });
+    // ✅ CORREÇÃO: .catch() ausente — adicionado para capturar falhas de rede
+    // ou erros HTTP e exibir mensagem em vez de spinner infinito.
+    setError(false);
+    getCharts(range)
+      .then((d) => {
+        if (active) {
+          setData(d);
+          setLoading(false);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setError(true);
+          setLoading(false);
+        }
+      });
     return () => { active = false; };
   }, [range]);
 
-  // Recharts espera array de objetos — transformação feita aqui,
-  // mantendo dashboardService.ts agnóstico à lib de gráficos
   const timeData = data
     ? data.labels.map((label, i) => ({
         name: label,
@@ -130,9 +138,14 @@ export default function DashboardCharts() {
         </select>
       </div>
 
+      {/* ✅ CORREÇÃO: renderização do estado de erro adicionada */}
       {loading ? (
         <div className="flex items-center justify-center py-20 text-slate-500">
           <Loader2 size={24} className="animate-spin" />
+        </div>
+      ) : error ? (
+        <div className="flex items-center justify-center py-20 text-red-400 text-sm">
+          Não foi possível carregar os gráficos. Tente novamente.
         </div>
       ) : (
         <>
