@@ -1,74 +1,151 @@
+// ─── MUDANÇAS NESTE ARQUIVO ────────────────────────────────────────────────
+// 1. `getOrders()` removido do Dashboard. Antes, carregava TODOS os pedidos
+//    para calcular totais com JavaScript. Com paginação isso quebraria —
+//    os totais refletiriam só os 5 primeiros de cada coluna.
+//
+// 2. `getStats()` adicionado — o banco calcula COUNT/SUM e devolve apenas
+//    números. Independente de quantos pedidos existam, é sempre uma query
+//    agregada leve.
+//
+// 3. `getRecentOrders(5)` adicionado — busca os 5 pedidos mais recentes
+//    para a seção "Pedidos recentes" sem carregar todo o histórico.
+//
+// 4. Mini-funil de status usa `stats.by_status[status]` em vez de filtrar
+//    o array de pedidos.
+//
+// 5. Tratamento de erro (planError / error) mantido do patch anterior.
+// ───────────────────────────────────────────────────────────────────────────
+
 import { useEffect, useState } from "react";
 import DashboardCharts from "../components/DashboardCharts";
 import { Link } from "react-router-dom";
 import {
+  AlertTriangle,
   ArrowUpRight,
   CircleDollarSign,
   Clock,
+  Crown,
   Package,
   PackageCheck,
 } from "lucide-react";
 import type { Order } from "../types/order";
-import { getOrders } from "../services/orderService";
+// MUDANÇA: getOrders removido; getStats e getRecentOrders adicionados.
+import { getRecentOrders } from "../services/orderService";
+import { getStats, type DashboardStats } from "../services/dashboardService";
 import { STATUS_META, STATUS_ORDER, formatCurrency } from "../lib/orderStatus";
 import AppLayout from "../components/AppLayout";
+import { isPlanInactiveError } from "../services/api";
 
 export default function Dashboard() {
-  const [orders, setOrders] = useState<Order[]>([]);
+  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [recentOrders, setRecentOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const [planError, setPlanError] = useState(false);
 
   useEffect(() => {
     let active = true;
-    getOrders().then((data) => {
-      if (active) {
-        setOrders(data);
-        setLoading(false);
-      }
-    });
+
+    // MUDANÇA: duas chamadas paralelas e leves em vez de uma que carregava
+    // todos os pedidos. getStats() → apenas números agregados do banco.
+    // getRecentOrders(5) → apenas os 5 pedidos mais recentes.
+    Promise.all([getStats(), getRecentOrders(5)])
+      .then(([statsData, recent]) => {
+        if (active) {
+          setStats(statsData);
+          setRecentOrders(recent);
+          setLoading(false);
+        }
+      })
+      .catch((err) => {
+        if (active) {
+          setLoading(false);
+          if (isPlanInactiveError(err)) {
+            setPlanError(true);
+          } else {
+            setError(true);
+          }
+        }
+      });
+
     return () => {
       active = false;
     };
   }, []);
 
-  const total = orders.length;
-  const open = orders.filter((o) => o.status !== "delivered").length;
-  const delivered = orders.filter((o) => o.status === "delivered").length;
-  const revenue = orders
-    .filter((o) => o.status === "delivered")
-    .reduce((sum, o) => sum + Number(o.price), 0);
-
-  const metrics = [
-    {
-      label: "Total de pedidos",
-      value: String(total),
-      icon: Package,
-      accent: "text-sky-400",
-    },
-    {
-      label: "Pedidos em aberto",
-      value: String(open),
-      icon: Clock,
-      accent: "text-amber-400",
-    },
-    {
-      label: "Pedidos entregues",
-      value: String(delivered),
-      icon: PackageCheck,
-      accent: "text-emerald-400",
-    },
-    {
-      label: "Faturamento",
-      value: formatCurrency(revenue),
-      icon: CircleDollarSign,
-      accent: "text-blue-400",
-    },
-  ];
+  // MUDANÇA: métricas lidas de `stats` em vez de calculadas no JS.
+  const metrics = stats
+    ? [
+        {
+          label: "Total de pedidos",
+          value: String(stats.total_orders),
+          icon: Package,
+          accent: "text-sky-400",
+        },
+        {
+          label: "Pedidos em aberto",
+          value: String(stats.open_orders),
+          icon: Clock,
+          accent: "text-amber-400",
+        },
+        {
+          label: "Pedidos entregues",
+          value: String(stats.delivered_orders),
+          icon: PackageCheck,
+          accent: "text-emerald-400",
+        },
+        {
+          label: "Faturamento",
+          value: formatCurrency(stats.total_revenue),
+          icon: CircleDollarSign,
+          accent: "text-blue-400",
+        },
+      ]
+    : [];
 
   return (
     <AppLayout title="Dashboard" subtitle="Visão geral do seu negócio">
       {loading ? (
         <SkeletonGrid />
-      ) : (
+      ) : planError ? (
+        <div className="flex flex-col items-center justify-center gap-5 rounded-2xl border border-amber-500/20 bg-amber-500/5 px-6 py-16 text-center">
+          <Crown size={40} className="text-amber-400" />
+          <div className="max-w-md">
+            <h2 className="text-lg font-semibold text-slate-100">
+              Plano inativo
+            </h2>
+            <p className="mt-2 text-sm text-slate-400">
+              Você não tem permissão para acessar este recurso. Assine o plano
+              premium para desbloquear o painel completo.
+            </p>
+          </div>
+          <a
+            href="#"
+            className="inline-flex items-center gap-2 rounded-lg bg-amber-500 px-5 py-2.5 text-sm font-semibold text-slate-900 transition hover:bg-amber-400"
+          >
+            <Crown size={16} />
+            Assinar agora
+          </a>
+        </div>
+      ) : error ? (
+        <div className="flex flex-col items-center justify-center gap-4 rounded-2xl border border-red-500/20 bg-red-500/5 px-6 py-16 text-center">
+          <AlertTriangle size={36} className="text-red-400" />
+          <div>
+            <h2 className="text-base font-semibold text-slate-100">
+              Não foi possível carregar o dashboard
+            </h2>
+            <p className="mt-1 text-sm text-slate-400">
+              Verifique sua conexão ou tente novamente mais tarde.
+            </p>
+          </div>
+          <button
+            onClick={() => window.location.reload()}
+            className="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-300 transition hover:bg-slate-800"
+          >
+            Tentar novamente
+          </button>
+        </div>
+      ) : stats ? (
         <div className="flex flex-col gap-6">
           {/* Métricas */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -88,7 +165,7 @@ export default function Dashboard() {
             ))}
           </div>
 
-          {/* Mini preview do Kanban */}
+          {/* Mini funil de status */}
           <div className="rounded-2xl border border-slate-800 bg-slate-800/60 p-5">
             <div className="flex items-center justify-between">
               <div>
@@ -108,10 +185,11 @@ export default function Dashboard() {
               </Link>
             </div>
 
-            <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+            <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
               {STATUS_ORDER.map((status) => {
                 const meta = STATUS_META[status];
-                const count = orders.filter((o) => o.status === status).length;
+                // MUDANÇA: contagem vem de stats.by_status — não filtra array.
+                const count = stats.by_status[status] ?? 0;
                 return (
                   <div
                     key={status}
@@ -138,40 +216,47 @@ export default function Dashboard() {
               Pedidos recentes
             </h2>
             <div className="mt-4 flex flex-col divide-y divide-slate-800">
-              {orders.slice(0, 5).map((order) => {
-                const meta = STATUS_META[order.status];
-                return (
-                  <Link
-                    key={order.id}
-                    to={`/orders/${order.id}`}
-                    className="flex items-center justify-between gap-3 py-3 transition hover:opacity-80"
-                  >
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-slate-100">
-                        {order.title}
-                      </p>
-                      <p className="truncate text-xs text-slate-400">
-                        {order.client.name}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span className="text-sm font-semibold text-slate-100">
-                        {formatCurrency(order.price)}
-                      </span>
-                      <span
-                        className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${meta.badge}`}
-                      >
-                        {meta.label}
-                      </span>
-                    </div>
-                  </Link>
-                );
-              })}
+              {recentOrders.length === 0 ? (
+                <p className="py-6 text-center text-sm text-slate-500">
+                  Nenhum pedido cadastrado ainda.
+                </p>
+              ) : (
+                recentOrders.map((order) => {
+                  const meta = STATUS_META[order.status];
+                  return (
+                    <Link
+                      key={order.id}
+                      to={`/orders/${order.id}`}
+                      className="flex items-center justify-between gap-3 py-3 transition hover:opacity-80"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-slate-100">
+                          {order.title}
+                        </p>
+                        <p className="truncate text-xs text-slate-400">
+                          {order.client.name}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="text-sm font-semibold text-slate-100">
+                          {formatCurrency(order.price)}
+                        </span>
+                        <span
+                          className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${meta.badge}`}
+                        >
+                          {meta.label}
+                        </span>
+                      </div>
+                    </Link>
+                  );
+                })
+              )}
             </div>
           </div>
+
           <DashboardCharts />
         </div>
-      )}
+      ) : null}
     </AppLayout>
   );
 }

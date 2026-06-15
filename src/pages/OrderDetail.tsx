@@ -1,6 +1,32 @@
+// ─── MUDANÇAS NESTE ARQUIVO ────────────────────────────────────────────────
+// 1. Adicionadas flags `isRejected` e `isDelivered` para controlar a seção
+//    de ações de forma explícita.
+//
+// 2. PEDIDO REJEITADO (isRejected):
+//    - Exibe apenas o botão "Excluir Pedido" e um banner informativo.
+//    - "Avançar", "Editar Pedido" e "Copiar link" são ocultados.
+//    - Requisito: "quando o pedido for rejeitado, a única opção disponível
+//      será EXCLUIR PEDIDO".
+//
+// 3. PEDIDO ENTREGUE (isDelivered):
+//    - "Avançar pedido" e "Editar Pedido" continuam visíveis mas são
+//      desabilitados (`disabled`) e acinzentados — cursor-not-allowed.
+//    - "Copiar link do cliente" e "Excluir Pedido" permanecem ativos.
+//    - Requisito: "deixe com uma cor mais acinzentada indicando
+//      indisponibilidade e desative a função desses botões".
+//
+// 4. Adicionado estado `actionError` com try/catch em `handleAdvance`,
+//    `handleEdit` e `handleDelete`. Antes, qualquer falha nessas ações
+//    era silenciosa — o usuário não recebia nenhum feedback.
+//
+// 5. `handleEdit` agora fecha o formulário e mantém o pedido atualizado
+//    na state local sem precisar navegar para fora.
+// ───────────────────────────────────────────────────────────────────────────
+
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
+  AlertTriangle,
   ArrowLeft,
   ArrowRight,
   CalendarDays,
@@ -32,6 +58,8 @@ import {
 } from "../lib/orderStatus";
 import AppLayout from "../components/AppLayout";
 import OrderForm from "../components/OrderForm";
+// MUDANÇA: importada função utilitária de erro
+import { getApiErrorMessage } from "../services/api";
 
 interface HistoryEntry {
   status: OrderStatus;
@@ -48,6 +76,8 @@ export default function OrderDetail() {
   const [notFound, setNotFound] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  // MUDANÇA: estado para erros das ações (avançar, editar, excluir)
+  const [actionError, setActionError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -71,26 +101,51 @@ export default function OrderDetail() {
     };
   }, [id]);
 
+  // MUDANÇA: adicionado try/catch — falhas silenciosas não mostram nenhum feedback
   async function handleAdvance() {
     if (!order) return;
     const next = nextStatus(order.status);
     if (!next) return;
-    const updated = await updateOrderStatus(order.id, next);
-    setOrder(updated);
-    navigate("/orders");
+    setActionError(null);
+    try {
+      const updated = await updateOrderStatus(order.id, next);
+      setOrder(updated);
+      navigate("/orders");
+    } catch (err) {
+      setActionError(
+        getApiErrorMessage(err, "Não foi possível avançar o pedido."),
+      );
+    }
   }
 
+  // MUDANÇA: adicionado try/catch + fecha o form após salvar com sucesso
   async function handleEdit(data: CreateOrderDTO) {
     if (!order) return;
-    const updated = await updateOrder(order.id, data);
-    setOrder(updated);
+    setActionError(null);
+    try {
+      const updated = await updateOrder(order.id, data);
+      setOrder(updated);
+      setFormOpen(false);
+    } catch (err) {
+      setActionError(
+        getApiErrorMessage(err, "Não foi possível salvar as alterações."),
+      );
+    }
   }
 
+  // MUDANÇA: adicionado try/catch
   async function handleDelete() {
     if (!order) return;
     if (!window.confirm(`Excluir o pedido "${order.title}"?`)) return;
-    await deleteOrder(order.id);
-    navigate("/orders", { replace: true });
+    setActionError(null);
+    try {
+      await deleteOrder(order.id);
+      navigate("/orders", { replace: true });
+    } catch (err) {
+      setActionError(
+        getApiErrorMessage(err, "Não foi possível excluir o pedido."),
+      );
+    }
   }
 
   function handleCopyLink() {
@@ -131,6 +186,10 @@ export default function OrderDetail() {
   const meta = STATUS_META[order.status];
   const next = nextStatus(order.status);
 
+  // MUDANÇA: flags de estado terminal para controle de ações
+  const isRejected = order.status === "rejected";
+  const isDelivered = order.status === "delivered";
+
   // Histórico mockado derivado do status atual do pedido.
   const currentIndex = STATUS_ORDER.indexOf(order.status);
   const history: HistoryEntry[] = STATUS_ORDER.slice(0, currentIndex + 1).map(
@@ -139,9 +198,6 @@ export default function OrderDetail() {
       date: i === 0 ? order.created_at : order.updated_at,
     }),
   );
-
-  // ✅ CORREÇÃO: console.log(order.reference_image) removido.
-  // Exibia URLs de arquivos de clientes no console do navegador em produção.
 
   return (
     <AppLayout title={order.title} subtitle={`Pedido #${order.id}`}>
@@ -248,41 +304,99 @@ export default function OrderDetail() {
         <div className="flex flex-col gap-6">
           <section className="rounded-2xl border border-slate-800 bg-slate-800/60 p-6">
             <h3 className="text-sm font-semibold text-slate-100">Ações</h3>
+
+            {/* MUDANÇA: mensagem de erro de ação exibida acima dos botões */}
+            {actionError && (
+              <div className="mt-3 flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+                <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+                <span>{actionError}</span>
+              </div>
+            )}
+
             <div className="mt-4 flex flex-col gap-3">
-              {next && (
-                <button
-                  onClick={handleAdvance}
-                  className="flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-slate-50 transition hover:bg-blue-500"
-                >
-                  <ArrowRight size={16} />
-                  Avançar para {STATUS_META[next].label}
-                </button>
+              {/* ── PEDIDO REJEITADO: apenas exclusão disponível ──────── */}
+              {/* MUDANÇA: quando rejeitado, todos os outros botões são ocultados. */}
+              {/* Requisito: "a única opção disponível será EXCLUIR PEDIDO". */}
+              {isRejected ? (
+                <>
+                  <div className="rounded-lg border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">
+                    Pedido rejeitado. Apenas a exclusão está disponível.
+                  </div>
+                  <button
+                    onClick={handleDelete}
+                    className="flex items-center justify-center gap-2 rounded-lg border border-slate-700 px-4 py-2.5 text-sm font-medium text-red-400 transition hover:border-red-500/40 hover:bg-red-500/10"
+                  >
+                    <Trash2 size={16} />
+                    Excluir Pedido
+                  </button>
+                </>
+              ) : (
+                <>
+                  {/* ── PEDIDO ENTREGUE: avançar e editar desabilitados ── */}
+                  {/* MUDANÇA: exibe botões desabilitados em vez de não exibi-los. */}
+                  {/* Requisito: "deixe com cor acinzentada e desative a função". */}
+                  {isDelivered ? (
+                    <button
+                      disabled
+                      title="Pedido já entregue — sem próxima etapa"
+                      className="flex cursor-not-allowed items-center justify-center gap-2 rounded-lg bg-slate-700/30 px-4 py-2.5 text-sm font-semibold text-slate-500"
+                    >
+                      <ArrowRight size={16} />
+                      Avançar pedido
+                    </button>
+                  ) : (
+                    /* ── OUTROS STATUS: botão de avanço ativo ─────────── */
+                    next && (
+                      <button
+                        onClick={handleAdvance}
+                        className="flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-slate-50 transition hover:bg-blue-500"
+                      >
+                        <ArrowRight size={16} />
+                        Avançar para {STATUS_META[next].label}
+                      </button>
+                    )
+                  )}
+
+                  {/* MUDANÇA: botão de edição desabilitado para entregue */}
+                  <button
+                    onClick={isDelivered ? undefined : () => setFormOpen(true)}
+                    disabled={isDelivered}
+                    title={
+                      isDelivered
+                        ? "Pedido já entregue — edição indisponível"
+                        : undefined
+                    }
+                    className={`flex items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium transition ${
+                      isDelivered
+                        ? "cursor-not-allowed border-slate-800 text-slate-500"
+                        : "border-slate-700 text-slate-200 hover:bg-slate-700/50"
+                    }`}
+                  >
+                    <Pencil size={16} />
+                    Editar Pedido
+                  </button>
+
+                  <button
+                    onClick={handleCopyLink}
+                    className="flex items-center justify-center gap-2 rounded-lg border border-slate-700 px-4 py-2.5 text-sm font-medium text-slate-200 transition hover:bg-slate-700/50"
+                  >
+                    {copied ? (
+                      <Check size={16} className="text-emerald-400" />
+                    ) : (
+                      <Copy size={16} />
+                    )}
+                    {copied ? "Link copiado!" : "Copiar link do cliente"}
+                  </button>
+
+                  <button
+                    onClick={handleDelete}
+                    className="flex items-center justify-center gap-2 rounded-lg border border-slate-700 px-4 py-2.5 text-sm font-medium text-red-400 transition hover:border-red-500/40 hover:bg-red-500/10"
+                  >
+                    <Trash2 size={16} />
+                    Excluir Pedido
+                  </button>
+                </>
               )}
-              <button
-                onClick={() => setFormOpen(true)}
-                className="flex items-center justify-center gap-2 rounded-lg border border-slate-700 px-4 py-2.5 text-sm font-medium text-slate-200 transition hover:bg-slate-700/50"
-              >
-                <Pencil size={16} />
-                Editar Pedido
-              </button>
-              <button
-                onClick={handleCopyLink}
-                className="flex items-center justify-center gap-2 rounded-lg border border-slate-700 px-4 py-2.5 text-sm font-medium text-slate-200 transition hover:bg-slate-700/50"
-              >
-                {copied ? (
-                  <Check size={16} className="text-emerald-400" />
-                ) : (
-                  <Copy size={16} />
-                )}
-                {copied ? "Link copiado!" : "Copiar link do cliente"}
-              </button>
-              <button
-                onClick={handleDelete}
-                className="flex items-center justify-center gap-2 rounded-lg border border-slate-700 px-4 py-2.5 text-sm font-medium text-red-400 transition hover:border-red-500/40 hover:bg-red-500/10"
-              >
-                <Trash2 size={16} />
-                Excluir Pedido
-              </button>
             </div>
           </section>
 

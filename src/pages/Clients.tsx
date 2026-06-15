@@ -1,5 +1,16 @@
+// ─── MUDANÇAS NESTE ARQUIVO ────────────────────────────────────────────────
+// 1. Adicionados estados `error` e `planError`.
+// 2. `refresh()` agora tem `.catch()` com distinção entre 403 (plano inativo)
+//    e demais erros — antes qualquer falha da API travava o spinner
+//    indefinidamente sem feedback ao usuário.
+// 3. Adicionado tratamento de erro nas ações `handleSubmit` e `handleDelete`
+//    com estado `actionError` para exibir mensagem inline em caso de falha.
+// ───────────────────────────────────────────────────────────────────────────
+
 import { useEffect, useState } from "react";
 import {
+  AlertTriangle,
+  Crown,
   Loader2,
   Mail,
   Pencil,
@@ -19,6 +30,8 @@ import { getOrders } from "../services/orderService";
 import type { Order } from "../types/order";
 import AppLayout from "../components/AppLayout";
 import ClientForm from "../components/ClientForm";
+// MUDANÇA: importadas as funções utilitárias de erro
+import { getApiErrorMessage, isPlanInactiveError } from "../services/api";
 
 export default function Clients() {
   const [clients, setClients] = useState<Client[]>([]);
@@ -26,12 +39,28 @@ export default function Clients() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Client | null>(null);
+  // MUDANÇA: estados de erro adicionados
+  const [error, setError] = useState(false);
+  const [planError, setPlanError] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   function refresh() {
+    setLoading(true);
+    setError(false);
+    setPlanError(false);
     Promise.all([getClients(), getOrders()])
       .then(([clientsData, ordersData]) => {
         setClients(clientsData);
         setOrders(ordersData);
+      })
+      // MUDANÇA: .catch() ausente — adicionado para cobrir 403 (plano inativo)
+      // e demais erros (500, sem rede). Antes qualquer falha travava o spinner.
+      .catch((err) => {
+        if (isPlanInactiveError(err)) {
+          setPlanError(true);
+        } else {
+          setError(true);
+        }
       })
       .finally(() => setLoading(false));
   }
@@ -50,19 +79,35 @@ export default function Clients() {
     setFormOpen(true);
   }
 
+  // MUDANÇA: adicionado try/catch para mostrar erro caso a criação/edição falhe
   async function handleSubmit(data: Omit<Client, "id">) {
-    if (editing) {
-      await updateClient(editing.id, data);
-    } else {
-      await createClient(data);
+    setActionError(null);
+    try {
+      if (editing) {
+        await updateClient(editing.id, data);
+      } else {
+        await createClient(data);
+      }
+      refresh();
+    } catch (err) {
+      setActionError(
+        getApiErrorMessage(err, "Não foi possível salvar o cliente."),
+      );
     }
-    refresh();
   }
 
+  // MUDANÇA: adicionado try/catch para mostrar erro caso a exclusão falhe
   async function handleDelete(client: Client) {
     if (!window.confirm(`Excluir o cliente "${client.name}"?`)) return;
-    await deleteClient(client.id);
-    refresh();
+    setActionError(null);
+    try {
+      await deleteClient(client.id);
+      refresh();
+    } catch (err) {
+      setActionError(
+        getApiErrorMessage(err, "Não foi possível excluir o cliente."),
+      );
+    }
   }
 
   return (
@@ -79,11 +124,65 @@ export default function Clients() {
         </button>
       }
     >
+      {/* MUDANÇA: mensagem de erro de ação exibida no topo do conteúdo */}
+      {actionError && (
+        <div className="mb-4 flex items-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+          <AlertTriangle size={16} />
+          <span>{actionError}</span>
+          <button
+            onClick={() => setActionError(null)}
+            className="ml-auto text-red-400 hover:text-red-200"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {loading ? (
         <div className="flex items-center justify-center py-24 text-slate-500">
           <Loader2 size={24} className="animate-spin" />
         </div>
-      ) : clients.length === 0 ? (
+      ) : /* MUDANÇA: renderização dos estados de erro ──────────────────── */
+      planError ? (
+        <div className="flex flex-col items-center justify-center gap-5 rounded-2xl border border-amber-500/20 bg-amber-500/5 px-6 py-16 text-center">
+          <Crown size={40} className="text-amber-400" />
+          <div className="max-w-md">
+            <h2 className="text-lg font-semibold text-slate-100">
+              Plano inativo
+            </h2>
+            <p className="mt-2 text-sm text-slate-400">
+              Você não tem permissão para acessar este recurso. Assine o plano
+              premium para gerenciar clientes.
+            </p>
+          </div>
+          <a
+            href="#"
+            className="inline-flex items-center gap-2 rounded-lg bg-amber-500 px-5 py-2.5 text-sm font-semibold text-slate-900 transition hover:bg-amber-400"
+          >
+            <Crown size={16} />
+            Assinar agora
+          </a>
+        </div>
+      ) : error ? (
+        <div className="flex flex-col items-center justify-center gap-4 rounded-2xl border border-red-500/20 bg-red-500/5 px-6 py-16 text-center">
+          <AlertTriangle size={36} className="text-red-400" />
+          <div>
+            <h2 className="text-base font-semibold text-slate-100">
+              Não foi possível carregar os clientes
+            </h2>
+            <p className="mt-1 text-sm text-slate-400">
+              Verifique sua conexão ou tente novamente mais tarde.
+            </p>
+          </div>
+          <button
+            onClick={refresh}
+            className="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-300 transition hover:bg-slate-800"
+          >
+            Tentar novamente
+          </button>
+        </div>
+      ) : /* ─────────────────────────────────────────────────────────────── */
+      clients.length === 0 ? (
         <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-slate-800 py-20 text-center">
           <Users size={32} className="text-slate-600" />
           <p className="text-sm text-slate-400">

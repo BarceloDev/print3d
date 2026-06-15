@@ -1,3 +1,13 @@
+// ─── MUDANÇAS NESTE ARQUIVO ────────────────────────────────────────────────
+// 1. `nextStatus()` corrigida: "delivered" e "rejected" agora são estados
+//    terminais — a função retorna null para ambos.
+//    Antes: nextStatus("delivered") retornava "rejected" (próximo no array),
+//    o que causava o botão "Avançar para Rejeitado" aparecer no OrderDetail
+//    para pedidos já entregues, o que não faz nenhum sentido de negócio.
+//    "rejected" é um caminho separado (via Kanban ou ação explícita),
+//    não uma progressão linear de "delivered".
+// ───────────────────────────────────────────────────────────────────────────
+
 import type { OrderStatus } from "../types/order";
 
 export interface StatusMeta {
@@ -99,8 +109,25 @@ export function formatDate(iso: string): string {
   });
 }
 
+/**
+ * Retorna o próximo status na progressão linear do pedido.
+ *
+ * MUDANÇA: "delivered" e "rejected" são estados terminais — retornam null.
+ * Antes: nextStatus("delivered") retornava "rejected" por ser o próximo no
+ * array, gerando um botão "Avançar para Rejeitado" sem sentido no OrderDetail.
+ * "rejected" é um caminho lateral (via Kanban), não uma continuação de
+ * "delivered".
+ */
 export function nextStatus(status: OrderStatus): OrderStatus | null {
+  // MUDANÇA: estados terminais — nenhum avanço possível a partir deles.
+  if (status === "delivered" || status === "rejected") return null;
+
   const index = STATUS_ORDER.indexOf(status);
-  if (index < 0 || index >= STATUS_ORDER.length - 1) return null;
-  return STATUS_ORDER[index + 1];
+  if (index < 0) return null;
+
+  const candidate = STATUS_ORDER[index + 1];
+  // Segurança extra: nunca avança automaticamente para "rejected".
+  if (!candidate || candidate === "rejected") return null;
+
+  return candidate;
 }

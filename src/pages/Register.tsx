@@ -1,3 +1,11 @@
+// ─── MUDANÇAS NESTE ARQUIVO ────────────────────────────────────────────────
+// 1. Mínimo de caracteres da senha corrigido de 6 para 8, alinhando com a
+//    validação do backend (`'password' => 'required|string|min:8|confirmed'`).
+//    Antes, o formulário deixava passar senhas de 6–7 caracteres que o Laravel
+//    rejeitava com 422 — o usuário via uma mensagem de erro genérica sem
+//    entender o motivo.
+// ───────────────────────────────────────────────────────────────────────────
+
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
@@ -30,8 +38,9 @@ export default function Register() {
       setError("As senhas não conferem.");
       return;
     }
-    if (password.length < 6) {
-      setError("A senha deve ter ao menos 6 caracteres.");
+    // MUDANÇA: mínimo corrigido de 6 para 8 — o backend exige min:8.
+    if (password.length < 8) {
+      setError("A senha deve ter ao menos 8 caracteres.");
       return;
     }
 

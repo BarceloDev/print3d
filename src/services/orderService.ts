@@ -1,14 +1,58 @@
+// ─── MUDANÇAS NESTE ARQUIVO ────────────────────────────────────────────────
+// 1. Adicionada interface `OrderPage` — tipagem do objeto paginado que o
+//    Laravel retorna quando `per_page` é passado.
+// 2. Adicionada `getOrdersByStatus()` — busca uma página de pedidos de um
+//    status específico. Usada pelo Kanban para carregar cada coluna.
+// 3. Adicionada `getRecentOrders()` — busca os N pedidos mais recentes de
+//    todos os status. Usada pela seção "Pedidos recentes" do Dashboard.
+//    Extrai `.data` do objeto paginado retornado pelo backend.
+// ───────────────────────────────────────────────────────────────────────────
+
 import type { CreateOrderDTO, Order, OrderStatus } from "../types/order";
 import api from "./api";
 
-/**
- * Service de pedidos. Opera sobre o repositório em memória (mockData).
- * As assinaturas espelham as chamadas Axios que serão feitas contra a API real.
- */
+// MUDANÇA: tipagem do objeto paginado do Laravel.
+export interface OrderPage {
+  data: Order[];
+  current_page: number;
+  last_page: number;
+  per_page: number;
+  total: number;
+}
 
 export async function getOrders(): Promise<Order[]> {
   const res = await api.get("/orders");
   return res.data as Order[];
+}
+
+/**
+ * MUDANÇA: busca paginada de pedidos por status.
+ * Chamada pelo Kanban individualmente para cada coluna.
+ *
+ * GET /orders?status=printing&per_page=5&page=2
+ */
+export async function getOrdersByStatus(
+  status: OrderStatus,
+  page = 1,
+  perPage = 5,
+): Promise<OrderPage> {
+  const res = await api.get("/orders", {
+    params: { status, page, per_page: perPage },
+  });
+  return res.data as OrderPage;
+}
+
+/**
+ * MUDANÇA: busca os N pedidos mais recentes (todos os status).
+ * Usada pela seção "Pedidos recentes" do Dashboard.
+ * O backend retorna objeto paginado — extraímos apenas o array `.data`.
+ *
+ * GET /orders?per_page=5
+ */
+export async function getRecentOrders(limit = 5): Promise<Order[]> {
+  const res = await api.get("/orders", { params: { per_page: limit } });
+  const payload = res.data as OrderPage;
+  return payload.data;
 }
 
 export async function getOrder(id: number): Promise<Order> {
