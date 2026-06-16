@@ -189,6 +189,8 @@ export default function OrderDetail() {
   // MUDANÇA: flags de estado terminal para controle de ações
   const isRejected = order.status === "rejected";
   const isDelivered = order.status === "delivered";
+  // Orçamentos aguardam aprovação do CLIENTE — vendedor não pode aprovar.
+  const isBudget = order.status === "budget";
 
   // Histórico mockado derivado do status atual do pedido.
   const currentIndex = STATUS_ORDER.indexOf(order.status);
@@ -332,10 +334,15 @@ export default function OrderDetail() {
                 </>
               ) : (
                 <>
-                  {/* ── PEDIDO ENTREGUE: avançar e editar desabilitados ── */}
-                  {/* MUDANÇA: exibe botões desabilitados em vez de não exibi-los. */}
-                  {/* Requisito: "deixe com cor acinzentada e desative a função". */}
-                  {isDelivered ? (
+                  {/* ── PEDIDO EM ORÇAMENTO: aguardando aprovação do cliente ── */}
+                  {/* Vendedor não pode aprovar — apenas o cliente pode,         */}
+                  {/* via link público (PublicOrderController::approve).          */}
+                  {isBudget ? (
+                    <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-300">
+                      Aguardando aprovação do cliente. Envie o link abaixo para
+                      que ele possa aprovar ou recusar o orçamento.
+                    </div>
+                  ) : isDelivered ? (
                     <button
                       disabled
                       title="Pedido já entregue — sem próxima etapa"
