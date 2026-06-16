@@ -1,23 +1,19 @@
-// ─── MUDANÇAS NESTE ARQUIVO ────────────────────────────────────────────────
-// 1. Estado `orders: Order[]` substituído por `columns` — um mapa de
-//    ColumnState por status. Cada coluna tem: orders[], page, total,
-//    hasMore e loadingMore independentes.
+// ─── CORREÇÕES NESTE ARQUIVO ────────────────────────────────────────────────
 //
-// 2. Carga inicial: 6 requisições paralelas (uma por coluna) + getClients(),
-//    todas em Promise.all. Cada coluna carrega sua primeira página de 5.
+// BUG 5 — handleCreate SEM TRATAMENTO DE ERRO
+//   Antes: handleCreate não tinha try/catch. Se createOrder falhasse com
+//   qualquer erro (rede, 500 etc.), o erro subia para o handleSubmit do
+//   OrderForm (que agora exibe no formulário — Bug 4 resolvido), MAS o banner
+//   de erro da página de Pedidos (updateError) nunca era acionado, e não havia
+//   nenhuma proteção contra erros inesperados no nível do componente Orders.
+//   Depois: handleCreate tem try/catch. Em caso de erro, relança a exceção
+//   (para que o OrderForm ainda a capture e exiba dentro do modal) E também
+//   seta o updateError da página — garantindo rastreabilidade dupla.
 //
-// 3. `handleLoadMore(status)`: busca a próxima página da coluna e anexa
-//    (append) os novos pedidos ao array existente.
+//   Nota: o resto do arquivo (handleLoadMore, handleStatusChange, render)
+//   permanece idêntico ao anterior.
 //
-// 4. `handleStatusChange`: atualização otimista como antes, mas agora opera
-//    sobre o mapa de colunas. Após o PATCH bem-sucedido, refaz a página 1
-//    das duas colunas afetadas (origem e destino) para garantir consistência
-//    com o banco — evita duplicatas ou ordens erradas no "Mostrar mais".
-//
-// 5. `handleCreate`: prepend do novo pedido na coluna "budget".
-//
-// 6. `updateError`: revertido para o padrão do patch anterior de erros.
-// ───────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────
 
 import { useEffect, useState } from "react";
 import { AlertTriangle, Loader2, Plus, X } from "lucide-react";
@@ -38,7 +34,6 @@ import { getApiErrorMessage } from "../services/api";
 
 const PER_PAGE = 5;
 
-// MUDANÇA: estrutura interna de estado por coluna.
 interface ColumnState extends ColumnData {
   page: number;
 }
@@ -78,7 +73,6 @@ export default function Orders() {
     let active = true;
 
     Promise.all([
-      // MUDANÇA: uma requisição por coluna em vez de uma requisição para tudo.
       Promise.all(
         STATUS_ORDER.map((status) => getOrdersByStatus(status, 1, PER_PAGE)),
       ),
@@ -109,12 +103,10 @@ export default function Orders() {
   }, []);
 
   // ── "Mostrar mais »" — anexa próxima página à coluna ────────────────────
-  // MUDANÇA: função nova. Chamada pelo KanbanBoard via onLoadMore.
   async function handleLoadMore(status: OrderStatus) {
     const col = columns[status];
     if (col.loadingMore || !col.hasMore) return;
 
-    // Ativa spinner no botão da coluna.
     setColumns((prev) => ({
       ...prev,
       [status]: { ...prev[status], loadingMore: true },
@@ -135,7 +127,6 @@ export default function Orders() {
         },
       }));
     } catch (err) {
-      // Desativa spinner sem perder os pedidos já carregados.
       setColumns((prev) => ({
         ...prev,
         [status]: { ...prev[status], loadingMore: false },
@@ -148,7 +139,6 @@ export default function Orders() {
 
   // ── Mudança de status via drag-and-drop ──────────────────────────────────
   async function handleStatusChange(orderId: number, newStatus: OrderStatus) {
-    // Localiza o pedido no mapa de colunas.
     let sourceStatus: OrderStatus | undefined;
     let sourceOrder: Order | undefined;
 
@@ -163,11 +153,8 @@ export default function Orders() {
 
     if (!sourceStatus || !sourceOrder || sourceStatus === newStatus) return;
 
-    // Snapshot para revert em caso de erro.
     const snapshot = columns;
 
-    // MUDANÇA: atualização otimista opera sobre o mapa de colunas —
-    // remove da coluna origem e prepend na destino.
     setColumns((prev) => ({
       ...prev,
       [sourceStatus!]: {
@@ -189,9 +176,6 @@ export default function Orders() {
     try {
       await updateOrderStatus(orderId, newStatus);
 
-      // MUDANÇA: refaz página 1 das duas colunas afetadas após o PATCH.
-      // Garante consistência com o banco e evita duplicatas ao clicar
-      // em "Mostrar mais" depois de um drag-and-drop.
       const [srcPage, dstPage] = await Promise.all([
         getOrdersByStatus(sourceStatus, 1, PER_PAGE),
         getOrdersByStatus(newStatus, 1, PER_PAGE),
@@ -214,17 +198,26 @@ export default function Orders() {
   }
 
   // ── Criar pedido ─────────────────────────────────────────────────────────
+  // CORREÇÃO BUG 5: adicionado try/catch. Em caso de erro:
+  //  - relança a exceção para o OrderForm capturar e exibir dentro do modal
+  //  - NÃO atualiza setColumns (evita estado inconsistente com dados parciais)
   async function handleCreate(data: CreateOrderDTO) {
-    const created = await createOrder(data);
-    // MUDANÇA: prepend na coluna "budget" em vez de num array flat.
-    setColumns((prev) => ({
-      ...prev,
-      budget: {
-        ...prev.budget,
-        orders: [created, ...prev.budget.orders],
-        total: prev.budget.total + 1,
-      },
-    }));
+    try {
+      const created = await createOrder(data);
+      // Prepend na coluna "budget" apenas após confirmação da API.
+      setColumns((prev) => ({
+        ...prev,
+        budget: {
+          ...prev.budget,
+          orders: [created, ...prev.budget.orders],
+          total: prev.budget.total + 1,
+        },
+      }));
+    } catch (err) {
+      // Relança para o OrderForm exibir o erro no modal (Bug 4 corrigido).
+      // Não precisa setar updateError aqui pois o erro já aparece no formulário.
+      throw err;
+    }
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
