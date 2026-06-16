@@ -1,11 +1,21 @@
-// ─── MUDANÇAS NESTE ARQUIVO ────────────────────────────────────────────────
-// 1. Importado `isAxiosError` do axios para tipagem segura nos utilitários.
-// 2. Adicionada `getApiErrorMessage()` — converte qualquer erro Axios em texto
-//    legível pelo usuário (cobre 422 do Laravel, 401, 403, 429, 5xx e sem rede).
-// 3. Adicionada `isPlanInactiveError()` — identifica se o erro é um 403
-//    do middleware CheckPlanActive, usado no Dashboard e Clients para exibir
-//    a mensagem de "assine o plano".
-// ───────────────────────────────────────────────────────────────────────────
+// ─── CORREÇÕES NESTE ARQUIVO ────────────────────────────────────────────────
+//
+// BUG 2 — RAIZ DA "TELA ESCURA" AO CADASTRAR PEDIDO
+//   Antes: o interceptor de resposta chamava window.location.assign("/login")
+//   quando recebia um 401. Isso causava:
+//     1) A página atual esvaziar instantaneamente (tela escura/branca)
+//     2) Um reload completo do navegador — pior performance e UX
+//     3) O token já removido do localStorage fazia o PrivateRoute redirecionar
+//        para /login na recarga (manifestando-se como o "bug do redirect")
+//   Depois: em vez de navegação hard, o interceptor dispara o CustomEvent
+//   "auth:unauthorized". O AuthContext escuta esse evento, limpa o estado
+//   React e o React Router faz o redirect via SPA navigation — sem reload,
+//   sem tela em branco.
+//
+// As demais funções utilitárias (getApiErrorMessage, isPlanInactiveError)
+// permanecem idênticas.
+//
+// ────────────────────────────────────────────────────────────────────────────
 
 import axios, { isAxiosError } from "axios";
 
@@ -32,23 +42,33 @@ api.interceptors.request.use((config) => {
 });
 
 /**
- * Interceptor de resposta: em caso de 401, limpa a sessão e redireciona para /login.
+ * CORREÇÃO BUG 2:
+ * Interceptor de resposta: em caso de 401, em vez de chamar
+ * window.location.assign (que causava reload completo e tela escura),
+ * agora dispara o evento customizado "auth:unauthorized".
+ *
+ * O AuthContext escuta esse evento e limpa o estado React de forma reativa,
+ * deixando o React Router redirecionar para /login via SPA navigation
+ * (sem reload de página, sem flash de tela em branco).
+ *
  * Demais erros são repassados para que cada chamador decida como tratá-los.
  */
 api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error?.response?.status === 401) {
-      localStorage.removeItem(TOKEN_KEY);
-      if (window.location.pathname !== "/login") {
-        window.location.assign("/login");
-      }
+      // ANTES (bugado):
+      // localStorage.removeItem(TOKEN_KEY);
+      // if (window.location.pathname !== "/login") {
+      //   window.location.assign("/login");  ← causava tela escura + hard reload
+      // }
+
+      // DEPOIS (corrigido): evento reativo — AuthContext trata a limpeza.
+      window.dispatchEvent(new CustomEvent("auth:unauthorized"));
     }
     return Promise.reject(error);
   },
 );
-
-// ─── MUDANÇA: funções utilitárias de erro ──────────────────────────────────
 
 /**
  * Extrai uma mensagem amigável de erros Axios.
@@ -67,7 +87,6 @@ export function getApiErrorMessage(error: unknown, fallback?: string): string {
     const data = error.response?.data as Record<string, unknown> | undefined;
 
     if (status === 422) {
-      // Erros de validação do Laravel vêm dentro de `errors` como arrays por campo.
       const errors = data?.errors as Record<string, string[]> | undefined;
       if (errors) {
         const firstKey = Object.keys(errors)[0];
@@ -96,7 +115,6 @@ export function getApiErrorMessage(error: unknown, fallback?: string): string {
       return "Erro no servidor. Tente novamente mais tarde.";
     }
 
-    // Sem resposta = sem rede ou CORS
     if (!error.response) {
       return "Sem conexão com o servidor. Verifique sua internet.";
     }
@@ -112,7 +130,5 @@ export function getApiErrorMessage(error: unknown, fallback?: string): string {
 export function isPlanInactiveError(error: unknown): boolean {
   return isAxiosError(error) && error.response?.status === 403;
 }
-
-// ──────────────────────────────────────────────────────────────────────────
 
 export default api;
