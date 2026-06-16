@@ -112,14 +112,21 @@ export function formatDate(iso: string): string {
 /**
  * Retorna o próximo status na progressão linear do pedido.
  *
- * MUDANÇA: "delivered" e "rejected" são estados terminais — retornam null.
- * Antes: nextStatus("delivered") retornava "rejected" por ser o próximo no
- * array, gerando um botão "Avançar para Rejeitado" sem sentido no OrderDetail.
- * "rejected" é um caminho lateral (via Kanban), não uma continuação de
- * "delivered".
+ * REGRA DE NEGÓCIO:
+ * - "budget" → null: o vendedor NÃO pode avançar para "approved".
+ *   A aprovação é exclusiva do cliente, via link público
+ *   (PublicOrderController::approve). No OrderDetail, o status "budget"
+ *   exibe uma mensagem orientando o vendedor a enviar o link ao cliente.
+ *
+ * - "approved" → "printing": após aprovação do cliente, o vendedor
+ *   avança manualmente para impressão.
+ *
+ * - "delivered" e "rejected" são estados terminais — retornam null.
  */
 export function nextStatus(status: OrderStatus): OrderStatus | null {
-  // MUDANÇA: estados terminais — nenhum avanço possível a partir deles.
+  // "budget": aguardando aprovação do cliente — vendedor não pode avançar.
+  if (status === "budget") return null;
+  // Estados terminais — nenhum avanço possível.
   if (status === "delivered" || status === "rejected") return null;
 
   const index = STATUS_ORDER.indexOf(status);
