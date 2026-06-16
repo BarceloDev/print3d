@@ -1,7 +1,23 @@
+// ─── CORREÇÕES NESTE ARQUIVO ────────────────────────────────────────────────
+//
+// BUG 4 — NENHUM FEEDBACK DE ERRO AO CADASTRAR PEDIDO
+//   Antes: handleSubmit usava apenas try/finally sem catch. Quando onSubmit
+//   lançava um erro (falha de API, 422, 500 etc.), o erro era silenciado:
+//   o spinner sumia, mas nenhuma mensagem era exibida — o usuário ficava
+//   sem saber o que aconteceu.
+//   Depois: adicionado estado apiError + bloco catch que usa getApiErrorMessage
+//   para converter o erro HTTP em texto legível e exibi-lo no formulário.
+//   O erro é limpo ao abrir o modal (no useEffect de reidratação) e ao
+//   iniciar um novo envio.
+//
+// ────────────────────────────────────────────────────────────────────────────
+
 import { useEffect, useState, type FormEvent } from "react";
-import { ImagePlus, Loader2, Save } from "lucide-react";
+import { AlertTriangle, ImagePlus, Loader2, Save } from "lucide-react";
 import type { Client } from "../types/client";
 import type { CreateOrderDTO, Order } from "../types/order";
+// CORREÇÃO BUG 4: importado para converter erros HTTP em mensagens amigáveis.
+import { getApiErrorMessage } from "../services/api";
 import Modal from "./Modal";
 
 interface OrderFormProps {
@@ -35,6 +51,8 @@ export default function OrderForm({
   const [imageName, setImageName] = useState<string>("");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  // CORREÇÃO BUG 4: estado para exibir erro de API no formulário.
+  const [apiError, setApiError] = useState<string | null>(null);
 
   // Reidrata o formulário sempre que abrir (criação x edição).
   useEffect(() => {
@@ -47,6 +65,8 @@ export default function OrderForm({
     setImageFile(undefined);
     setImageName("");
     setErrors({});
+    // CORREÇÃO BUG 4: limpa o erro de API ao reabrir o modal.
+    setApiError(null);
   }, [open, order, clients]);
 
   function validate(): boolean {
@@ -66,6 +86,9 @@ export default function OrderForm({
 
     if (!validate()) return;
     setSaving(true);
+    // CORREÇÃO BUG 4: limpa erro anterior a cada nova tentativa de envio.
+    setApiError(null);
+
     try {
       await onSubmit({
         title: title.trim(),
@@ -76,6 +99,12 @@ export default function OrderForm({
         reference_image: imageFile,
       });
       onClose();
+    } catch (err) {
+      // CORREÇÃO BUG 4: antes não havia catch — o erro era silenciado.
+      // Agora converte o erro em mensagem legível e exibe no formulário.
+      setApiError(
+        getApiErrorMessage(err, "Não foi possível salvar o pedido. Tente novamente."),
+      );
     } finally {
       setSaving(false);
     }
@@ -88,6 +117,14 @@ export default function OrderForm({
       onClose={onClose}
     >
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+        {/* CORREÇÃO BUG 4: exibe o erro de API acima dos botões de ação. */}
+        {apiError && (
+          <div className="flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2.5 text-sm text-red-300">
+            <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+            <span>{apiError}</span>
+          </div>
+        )}
+
         <label className={labelClass}>
           Título
           <input
