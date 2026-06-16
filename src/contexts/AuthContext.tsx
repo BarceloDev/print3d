@@ -1,3 +1,23 @@
+// ─── CORREÇÕES NESTE ARQUIVO ────────────────────────────────────────────────
+//
+// BUG 1 — RAIZ DO "REDIRECT PARA LOGIN AO RECARREGAR"
+//   Antes: useState inicializava token e user como null. O useEffect lia
+//   o localStorage APÓS o primeiro render. O PrivateRoute, no primeiro render,
+//   encontrava isAuthenticated=false e redirecionava para /login antes que a
+//   hidratação acontecesse.
+//   Depois: lazy initializer (função como argumento do useState) lê o
+//   localStorage de forma SÍNCRONA, garantindo que token e user já estejam
+//   populados na primeira renderização. O useEffect de hidratação foi removido.
+//
+// BUG 2 — COMPLEMENTO DA CORREÇÃO DO api.ts (interceptor 401)
+//   Antes: o interceptor chamava window.location.assign("/login"), causando
+//   navegação hard com reload completo e a "tela escura".
+//   Depois: o interceptor dispara o evento "auth:unauthorized". Este contexto
+//   escuta esse evento e limpa o estado React de forma reativa, deixando o
+//   React Router fazer o redirect de forma suave (SPA), sem reload de página.
+//
+// ────────────────────────────────────────────────────────────────────────────
+
 import {
   createContext,
   useContext,
@@ -28,22 +48,48 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(null);
+// ── CORREÇÃO BUG 1: lazy initializer ──────────────────────────────────────
+// As funções passadas para useState() são executadas de forma SÍNCRONA na
+// montagem, antes do primeiro render. Isso garante que isAuthenticated seja
+// true já na primeira renderização quando há um token salvo — eliminando o
+// flash de redirect para /login em toda atualização de página.
+// ──────────────────────────────────────────────────────────────────────────
+function getInitialToken(): string | null {
+  return localStorage.getItem(TOKEN_KEY);
+}
 
-  // Reidrata a sessão a partir do localStorage no carregamento inicial.
+function getInitialUser(): User | null {
+  const stored = localStorage.getItem(USER_KEY);
+  if (!stored) return null;
+  try {
+    return JSON.parse(stored) as User;
+  } catch {
+    localStorage.removeItem(USER_KEY);
+    return null;
+  }
+}
+
+export function AuthProvider({ children }: { children: ReactNode }) {
+  // CORREÇÃO BUG 1: inicialização síncrona a partir do localStorage.
+  // Antes era useState<string | null>(null) + useEffect para popular.
+  const [token, setToken] = useState<string | null>(getInitialToken);
+  const [user, setUser] = useState<User | null>(getInitialUser);
+
+  // CORREÇÃO BUG 2: escuta o evento emitido pelo interceptor 401 do api.ts.
+  // Ao receber "auth:unauthorized", limpa estado React e localStorage.
+  // O React Router detecta isAuthenticated=false e faz o redirect para /login
+  // via SPA navigation (sem reload, sem tela preta).
   useEffect(() => {
-    const storedToken = localStorage.getItem(TOKEN_KEY);
-    const storedUser = localStorage.getItem(USER_KEY);
-    if (storedToken) setToken(storedToken);
-    if (storedUser) {
-      try {
-        setUser(JSON.parse(storedUser) as User);
-      } catch {
-        localStorage.removeItem(USER_KEY);
-      }
+    function handleUnauthorized() {
+      localStorage.removeItem(TOKEN_KEY);
+      localStorage.removeItem(USER_KEY);
+      setToken(null);
+      setUser(null);
     }
+
+    window.addEventListener("auth:unauthorized", handleUnauthorized);
+    return () =>
+      window.removeEventListener("auth:unauthorized", handleUnauthorized);
   }, []);
 
   async function login(email: string, password: string): Promise<void> {
