@@ -44,6 +44,11 @@ interface KanbanBoardProps {
 // Estados que não podem ser movidos via drag (terminais).
 const LOCKED_STATUSES: OrderStatus[] = ["rejected", "delivered"];
 
+// Colunas que não aceitam drops via drag — o vendedor não pode
+// mover pedidos PARA estas colunas. "approved" só pode ser definido
+// pelo cliente, via link público (PublicOrderController::approve).
+const LOCKED_DROP_TARGETS: OrderStatus[] = ["approved"];
+
 export default function KanbanBoard({
   columns,
   onStatusChange,
@@ -59,6 +64,9 @@ export default function KanbanBoard({
     setDraggingId(null);
 
     if (!Number.isNaN(id)) {
+      // Bloqueia drop em colunas restritas ao cliente (ex: "approved").
+      if (LOCKED_DROP_TARGETS.includes(targetStatus)) return;
+
       // Acha o status atual do pedido varrendo as colunas carregadas.
       let sourceStatus: OrderStatus | undefined;
       for (const s of STATUS_ORDER) {
@@ -83,12 +91,15 @@ export default function KanbanBoard({
         const col = columns[status];
         const isOver = overColumn === status;
 
+        const isLockedTarget = LOCKED_DROP_TARGETS.includes(status);
+
         return (
           <section
             key={status}
             onDragOver={(e) => {
               e.preventDefault();
-              setOverColumn(status);
+              // Não destaca colunas que não aceitam drops (ex: "aprovado").
+              if (!isLockedTarget) setOverColumn(status);
             }}
             onDragLeave={(e) => {
               if (!e.currentTarget.contains(e.relatedTarget as Node))
@@ -106,6 +117,15 @@ export default function KanbanBoard({
                 <span className={`text-sm font-semibold ${meta.columnHeader}`}>
                   {meta.label}
                 </span>
+                {/* Badge indicando que esta coluna é exclusiva do cliente */}
+                {isLockedTarget && (
+                  <span
+                    title="Aprovação exclusiva do cliente (via link)"
+                    className="rounded px-1.5 py-0.5 text-[10px] font-medium bg-sky-500/10 text-sky-400 ring-1 ring-inset ring-sky-500/20"
+                  >
+                    cliente
+                  </span>
+                )}
               </div>
               {/* MUDANÇA: exibe total real do banco, não só os carregados. */}
               <span className="rounded-full bg-slate-800 px-2 py-0.5 text-xs font-medium text-slate-300">
