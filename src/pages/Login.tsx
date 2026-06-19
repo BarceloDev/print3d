@@ -115,10 +115,6 @@ export default function Login() {
             </Link>
           </p>
         </div>
-
-        <p className="mt-6 text-center text-xs text-slate-500">
-          Demo: qualquer e-mail e senha válidos funcionam.
-        </p>
       </div>
     </div>
   );
