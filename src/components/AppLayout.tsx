@@ -61,9 +61,6 @@ export default function AppLayout({ children, title, subtitle, actions }: AppLay
             </Link>
           ))}
         </nav>
-        <div className="border-t border-slate-800 p-4 text-xs text-slate-500">
-          PRINT3D · v1.0
-        </div>
       </aside>
 
       {/* Sidebar - mobile overlay */}
