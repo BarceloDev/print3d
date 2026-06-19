@@ -90,7 +90,8 @@ export async function updateOrder(
     if (data.client_id !== undefined)
       fd.append("client_id", String(data.client_id));
     fd.append("reference_image", data.reference_image);
-    const res = await api.put(`/orders/${id}`, fd);
+    fd.append("_method", "PUT");
+    const res = await api.post(`/orders/${id}`, fd);
     return res.data as Order;
   }
   const res = await api.put(`/orders/${id}`, data);
